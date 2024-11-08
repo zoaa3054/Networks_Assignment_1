@@ -15,12 +15,6 @@ def get_file_size(file):
     file.seek(0)
     return size
 
-# function for getting the value of a field in the req/resp
-def getValueOfHeaderField(header, field):
-    headerArray = header.split('\r\n')
-    for h in headerArray:
-        if (h.split()[0] == field + ':'): return h.split()[1]
-
 def parse_http_request(request):
     """Parses an HTTP request and returns a tuple containing the method, URL,
     version, headers, and body.
@@ -219,28 +213,40 @@ def handle_get_request(method, url, version, headers):
     return ["{status}Content-Type: text/html\r\n\r\n<h1> Page not found </h1>"
             .format(status=NotFoundStatusLine).encode()]
 
-# def handle_post_request(method, url, version, headers, body):
+def handle_post_request_not_chunked(url, headers, body):
+    with open("."+ url, 'w') as file:
+        if(headers['Content-Type'].split('/')[0] == 'text'):
+            file.write(body.decode())
+        else:
+            file.write(body)
+    
+    return ["{status}Content-Type: text/html\r\n\r\n".format(status=SuccessStatusLine).encode()]
+
+def handle_post_request_chunked(url, headers, channel):
+    end_of_chunk = b'0\r\n\r\n'
+
+    request = channel.recv(3072).decode()
+    while request != end_of_chunk.decode():
+        with open("."+ url, 'ab') as file:
+            if(headers['Content-Type'].split('/')[0] == 'text'):
+                file.write(request.decode().split('\r\n')[1])
+            else:
+                file.write(request.decode().split('\r\n')[1].encode())
+        request = channel.recv(3072).decode()
+
 
 # function of the work done by some connection on a separate thread
 def startWork(server, channel, address):
     while True:
         # accepting the request and printing it
         request = channel.recv(3072).decode()
-        
-        print("Request: ", address)
-        print(request)
-        # if not request:
-        #     break
+
         parsedRequest = parse_http_request(request)
         print("method: ", parsedRequest[0])
         print("url: ", parsedRequest[1])
         print("version: ", parsedRequest[2])
         print("headers: ", parsedRequest[3].keys())
         print("body: ", parsedRequest[4])
-
-        # reqestArray = reqest.split('\r\n', 1)
-        # requestLine = reqestArray[0]
-        # header = reqestArray[1]
 
         if (parsedRequest[0] == "CLOSE"):
             channel.send("CLOSED".encode())
@@ -251,76 +257,24 @@ def startWork(server, channel, address):
             response = handle_get_request(parsedRequest[0], parsedRequest[1], parsedRequest[2], parsedRequest[3])
             print("no. chunks:", len(response))
             for i in range(len(response)):
-                print('{address}, chunk: {no} :\n'.format(address=address, no=i),response[i])
                 channel.send(response[i])
-                print("-----------------------------------------------------")
+                print('{address}, chunk: {no} sent'.format(address=address, no=i+1))
 
         if (parsedRequest[0] == "POST"):
-            response = handlePostRequest(parsedRequest[0], parsedRequest[1], parsedRequest[2], parsedRequest[3], parsedRequest[4])
+            if 'Transfer-Encoding' in parsedRequest[3].keys():
+                if parsedRequest[3]['Transfer-Encoding'] == "chunked":
+                    print("POST request chunked")
+                    response = handle_post_request_chunked(parsedRequest[1], parsedRequest[3],parsedRequest[4])
+                    channel.send(response)
+                else:
+                    print("POST request not chunked")
+                    channel.send("{status}Content-Type: text/html\r\n\r\n".format(status=SuccessStatusLine).encode())
+                    handle_post_request_not_chunked(parsedRequest[1], parsedRequest[3], channel)
+            
 
         if parsedRequest[3]['Connection'] == "close":
             break
 
-
-
-
-        # # parsing request Line
-        # method = requestLine.split()[0]
-        # filePath = requestLine.split()[1]
-
-        # #if GET request
-        # if (method == "GET"):
-        #     fileContent = None
-
-        #     #checking file extention
-        #     extention = filePath.split('.')[1]
-
-        #     # in case it is an image
-        #     if (extention == 'png' or extention == 'jpg'):
-        #         # check if the file exists
-        #         try:
-        #             with open(filePath, 'rb') as file:
-        #                 # reading the size of the image
-        #                 fileSize = getFileSize(file)
-
-        #                 # create the status line and header
-        #                 resoponseHeader = 'content_length: ' + str(fileSize) + '\r\n' + 'content_type: image/' + extention + '\r\n'
-        #                 channel.send((htmlSuccessStatusLine + resoponseHeader).encode())
-
-        #                 #sending image in chunks in case it is larger than 1024 bytes
-        #                 while (fileSize > 0):
-        #                     fileContent = file.read(1024)
-        #                     channel.send(fileContent)
-        #                     fileSize = fileSize - 1024
-
-        #         except(FileNotFoundError):
-        #             channel.send(htmlNotFoundStatusLine.encode())
-
-        #     # in case it is a text file
-        #     elif(extention == 'txt' or extention == 'html'):
-        #         # check if the file exists
-        #         try:
-        #             with open(filePath, 'r') as file:
-        #                 # reading the size of the file
-        #                 fileSize = getFileSize(file)
-
-        #                 # create the status line and header
-        #                 resoponseHeader = 'content_length: ' + str(fileSize) + '\r\n' + 'content_type: text/' + extention + '\r\n'
-        #                 channel.send((htmlSuccessStatusLine + resoponseHeader).encode())
-
-        #        #sending image in chunks in case it is larger than 1024 bytes
-        #                 while (fileSize > 0):
-        #                     fileContent = file.read(1024)
-        #                     channel.send(fileContent.encode())
-        #                     fileSize = fileSize - 1024
-        #         except(FileNotFoundError):
-        #             channel.send(htmlNotFoundStatusLine.encode())
-        #    # in case it is another file type
-        #     else:
-        #         channel.send(htmlNotFoundStatusLine.encode()) 
-        # elif (method == "POST"):
-        #     fileContent = reqest.split('\r\n\r\n', 1)[1]
-        #     # To Do
 
     channel.close()
 
