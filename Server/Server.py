@@ -1,3 +1,4 @@
+from datetime import date
 import threading
 import socket
 import asyncio
@@ -79,7 +80,7 @@ def handle_get_text_file_request(url):
         with open(url, 'r') as file:
             file_size = get_file_size(file)
             # Read the entire file if its size is less than 512 bytes
-            if file_size < 3000:
+            if file_size < 2048:
                 response_body = file.read()
     except FileNotFoundError:
         # Return a 404 Not Found response if the file is not found
@@ -90,7 +91,7 @@ def handle_get_text_file_request(url):
         ]
 
     # If the file size is small, send it as a single response
-    if file_size < 3000:
+    if file_size < 2048:
         return [
             '{status}Content-Type: text/{file_extension}\r\nContent-Length: {file_size}\r\n\r\n{response_body}'
             .format(
@@ -152,7 +153,7 @@ def handle_get_image_request(url):
         ]
 
     # If the file size is small, send it as a single response
-    if file_size < 3000:
+    if file_size < 2048:
         with open(url, 'rb') as file:
             response_body = file.read()
         return [
@@ -276,18 +277,33 @@ def handle_post_request_chunked(filePath, headers, channel):
 
 
 # function of the work done by some connection on a separate thread
-def startWork(server, channel, address):
+def startWork(channel, address):
+            
+    channel.settimeout(20.0)
     while True:
         print("A the start of the Server")
         # accepting the request and printing it
-        request = channel.recv(3072).decode()
-
+        request = None
+        try:
+            request = channel.recv(3072)
+        except:
+            print('{address} channel terminated due to timeout'.format(address=address))
+            print("threads: ", threading.active_count())
+            break
+        
+        if request == None:
+            print("{status}\r\n\r\n".format(status=NotFoundStatusLine))
+            channel.send("{status}\r\n\r\n".format(status=NotFoundStatusLine).encode())
+            continue
+        
         parsedRequest = parse_http_request(request)
-        print("method: ", parsedRequest[0])
-        print("url: ", parsedRequest[1])
-        print("version: ", parsedRequest[2])
-        print("headers: ", parsedRequest[3].keys())
-        print("body: ", parsedRequest[4])
+        print(  "-------------------------------------\nmethod: ", parsedRequest[0],
+                "\nurl: ", parsedRequest[1], 
+                "\nversion: ", parsedRequest[2],
+                "\nheaders: ", parsedRequest[3].keys(), 
+                "\nbody: ", parsedRequest[4],
+                "\nchannel:", address,
+                "\n------------------------------------")
 
         if (parsedRequest[0] == "CLOSE"):
             channel.send("CLOSED".encode())
@@ -302,22 +318,23 @@ def startWork(server, channel, address):
                 print('{address}, chunk: {no} sent'.format(address=address, no=i+1))
 
         elif (parsedRequest[0] == "POST"):
-            if ('Transfer-Encoding' in parsedRequest[3].keys() and parsedRequest[3]['Transfer-Encoding'] == "chunked"):
-                print("POST request chunked")
-                channel.send(handle_post_request_chunked(parsedRequest[1], parsedRequest[3],channel))
-            else:
-                print("POST request not chunked")
-                channel.send(handle_post_request_not_chunked(parsedRequest[1], parsedRequest[3], parsedRequest[4]))
-                    
+            if 'Transfer-Encoding' in parsedRequest[3].keys():
+                if parsedRequest[3]['Transfer-Encoding'] == "chunked":
+                    print("POST request chunked")
+                    response = handle_post_request_chunked(parsedRequest[1], parsedRequest[3],parsedRequest[4])
+                    channel.send(response)
+                else:
+                    print("POST request not chunked")
+                    channel.send("{status}Content-Type: text/html\r\n\r\n".format(status=SuccessStatusLine).encode())
+                    handle_post_request_not_chunked(parsedRequest[1], parsedRequest[3], channel)
             
 
-        # if parsedRequest[3]['Connection'] == "close":
-        #     break
+        if parsedRequest[3]['Connection'] == "close":
+            break
 
 
     channel.close()
 
-     
 # initializing the server socket for TCP handshaking
 ip = '127.0.0.1'
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -326,18 +343,16 @@ server.bind((ip, port))
 # start listening for the incoming
 server.listen(2)
 print("Server started!")
-beginingSwitch = True
-
+server.settimeout(20.0)
 while(True):
     
     try:
         newChannel, address = server.accept()
-    except(socket.error):
-        # print("Server closed due to time out (" , timeout , "sec)!")
+    except(socket.timeout):
+        print("Server closed due to time out (20 sec)!")
         break
 
     
     print("new connection accepted: ", address)
-    newChannelThread = threading.Thread(target= startWork, args= (server, newChannel, address))
+    newChannelThread = threading.Thread(target= startWork, args= (newChannel, address))
     newChannelThread.start()
-    
