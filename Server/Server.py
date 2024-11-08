@@ -9,7 +9,7 @@ NotFoundStatusLine = 'HTTP/1.1 404 Not Found\r\n'
 
 
 # function for getting the file size
-def getFileSize(file):
+def get_file_size(file):
     file.seek(0, 2)
     size = file.tell()
     file.seek(0)
@@ -35,7 +35,8 @@ def parse_http_request(request):
     lines = request.split('\r\n')
 
     # Extract the method, URL, and version from the first line
-    method, url, version = lines[0].split()
+    print("head line: ",lines[0])
+    method, url, version = lines[0].split(" ")
 
     # Initialize the headers and body
     headers = {}
@@ -71,22 +72,22 @@ def handle_get_text_file_request(url):
 
     try:
         with open(url, 'r') as file:
-            file_size = getFileSize(file)
+            file_size = get_file_size(file)
             # Read the entire file if its size is less than 512 bytes
             if file_size < 512:
                 response_body = file.read()
     except FileNotFoundError:
         # Return a 404 Not Found response if the file is not found
         return [
-            '{status}Content-Type: text/{file_extension}\r\n\r\n<h1> Page not found </h1>'
+            '{status}Content-Type: text/{file_extension}\r\n\r\n<h1> Page not found </h1>\r\n\r\n'
             .format(status=NotFoundStatusLine, file_extension=file_extension)
             .encode()
         ]
 
     # If the file size is small, send it as a single response
-    if file_size < 512:
+    if file_size < 200:
         return [
-            '{status}Content-Type: text/{file_extension}\r\nContent-Length:{file_size}\r\n\r\n{response_body}'
+            '{status}Content-Type: text/{file_extension}\r\nContent-Length: {file_size}\r\n\r\n{response_body}'
             .format(
                 status=SuccessStatusLine,
                 response_body=response_body,
@@ -100,19 +101,18 @@ def handle_get_text_file_request(url):
         response = []
         response.append(
             '{status}Content-Type: text/{file_extension}\r\nTransfer-Encoding: chunked\r\n\r\n'
-            .format(status=SuccessStatusLine, file_extension=file_extension)
+            .format(status=SuccessStatusLine, file_extension=file_extension, file_size=file_size)
             .encode()
         )
 
         # Read and send the file in chunks of 1024 bytes
         with open(url, 'r') as file:
-            while True:
-                file_content = file.read(1024)
-                if not file_content:
-                    break
-                response.append(
-                    '{content}'.format(content=file_content).encode()
-                )
+            while file_size > 0:
+                file_content = file.read(3000)
+                size = str(hex(len(file_content))).replace("0x",'')
+                response.append('{size}\r\n{content}\r\n'.format(size=size,content=file_content).encode())
+                file_size -= 3000
+
 
         # Indicate the end of the chunked transfer
         response.append(b'0\r\n\r\n')
@@ -147,33 +147,35 @@ def handle_get_image_request(url):
         ]
 
     # If the file size is small, send it as a single response
-    if file_size < 512:
+    if file_size < 2048:
         with open(url, 'rb') as file:
             response_body = file.read()
         return [
-            "{status}Content-Type: image/{extension}\r\nContent-Length:{size}\r\n\r\n"
+            "{status}Content-Type: image/{extension}\r\nContent-Length: {size}\r\n\r\n"
             .format(status=SuccessStatusLine, size=file_size, extension=extension)
             .encode()
-            + response_body
+            + response_body + '\r\n'.encode()
         ]
 
     # Use chunked transfer encoding for larger files
     response = []
     response.append(
-        "{status}Content-Type: image/{extension}\r\nTransfer-Encoding: chunked\r\n\r\n"
-        .format(status=SuccessStatusLine, extension=extension)
+        "{status}Content-Type: image/{extension}\r\nContent-Length: {size}\r\nTransfer-Encoding: chunked\r\n\r\n"
+        .format(status=SuccessStatusLine, extension=extension, size=file_size)
         .encode()
     )
 
     # Read and send the file in chunks of 1024 bytes
     with open(url, 'rb') as file:
         while file_size > 0:
-            file_content = file.read(1024)
-            response.append(file_content)
+            file_content = file.read(3000)
+            size = str(hex(len(file_content))).replace("0x",'')
+            msg= size.encode() + '\r\n'.encode() + file_content + "\r\n".encode()
+            response.append(msg)
             file_size -= len(file_content)
 
     # Indicate the end of the chunked transfer
-    response.append(b'0\r\n\r\n')
+    response.append('0\r\n\r\n'.encode())
     return response
 
 def handle_get_request(method, url, version, headers):
@@ -198,29 +200,43 @@ def handle_get_request(method, url, version, headers):
     if url == '/':
         url = '/index.html'
 
-    if 'text' in headers['Accept'].split(',')[0]:
-        return handle_get_text_file_request('.' + url)
-
-    if 'image' in headers['Accept'].split(',')[0]:
-        return handle_get_image_request('.' + url)
+    
+    extension = url.split('.')[-1]
+    if extension == 'htm' or extension == 'html' or extension == 'txt':
+        if list(url)[0] == '/':
+            return handle_get_text_file_request('.' + url) 
+        else:
+            return handle_get_text_file_request(url)
+    
+    if extension == 'png' or extension == 'gif' or extension == 'jpg' or extension == 'jpeg' or extension == 'ico' or extension == 'icon':
+        print("image")
+        if list(url)[0] == '/':
+            return handle_get_image_request('.' + url) 
+        else:
+                return handle_get_image_request(url)
+            
 
     return ["{status}Content-Type: text/html\r\n\r\n<h1> Page not found </h1>"
             .format(status=NotFoundStatusLine).encode()]
 
-def handle_post_request(method, url, version, headers, body):
+# def handle_post_request(method, url, version, headers, body):
+
 # function of the work done by some connection on a separate thread
 def startWork(server, channel, address):
     while True:
         # accepting the request and printing it
         request = channel.recv(3072).decode()
+        
+        print("Request: ", address)
+        print(request)
+        # if not request:
+        #     break
         parsedRequest = parse_http_request(request)
         print("method: ", parsedRequest[0])
         print("url: ", parsedRequest[1])
         print("version: ", parsedRequest[2])
         print("headers: ", parsedRequest[3].keys())
-        print("header Accept: ", parsedRequest[3]['Accept'])
         print("body: ", parsedRequest[4])
-
 
         # reqestArray = reqest.split('\r\n', 1)
         # requestLine = reqestArray[0]
@@ -233,12 +249,18 @@ def startWork(server, channel, address):
         if (parsedRequest[0] == "GET"):
             print("GET request")
             response = handle_get_request(parsedRequest[0], parsedRequest[1], parsedRequest[2], parsedRequest[3])
-            for i in response:
-                print(i)
-                channel.send(i)
+            print("no. chunks:", len(response))
+            for i in range(len(response)):
+                print('{address}, chunk: {no} :\n'.format(address=address, no=i),response[i])
+                channel.send(response[i])
+                print("-----------------------------------------------------")
 
         if (parsedRequest[0] == "POST"):
             response = handlePostRequest(parsedRequest[0], parsedRequest[1], parsedRequest[2], parsedRequest[3], parsedRequest[4])
+
+        if parsedRequest[3]['Connection'] == "close":
+            break
+
 
 
 
@@ -299,6 +321,8 @@ def startWork(server, channel, address):
         # elif (method == "POST"):
         #     fileContent = reqest.split('\r\n\r\n', 1)[1]
         #     # To Do
+
+    channel.close()
 
      
 # initializing the server socket for TCP handshaking
