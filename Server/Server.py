@@ -332,10 +332,6 @@ def startWork(channel, address):
         if parsedRequest[3]['Connection'] == "close":
             break
 
-        if parsedRequest[3]['Connection'] == "close":
-            break
-
-
 
     channel.close()
 
