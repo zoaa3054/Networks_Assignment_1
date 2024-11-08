@@ -107,7 +107,7 @@ def handle_get_text_file_request(url):
         response = []
         response.append(
             '{status}Content-Type: text/{file_extension}\r\nTransfer-Encoding: chunked\r\n\r\n'
-            .format(status=SuccessStatusLine, file_extension=file_extension)
+            .format(status=SuccessStatusLine, file_extension=file_extension, file_size=file_size)
             .encode()
         )
 
@@ -166,8 +166,8 @@ def handle_get_image_request(url):
     # Use chunked transfer encoding for larger files
     response = []
     response.append(
-        "{status}Content-Type: image/{extension}\r\nTransfer-Encoding: chunked\r\n\r\n"
-        .format(status=SuccessStatusLine, extension=extension)
+        "{status}Content-Type: image/{extension}\r\nContent-Length: {size}\r\nTransfer-Encoding: chunked\r\n\r\n"
+        .format(status=SuccessStatusLine, extension=extension, size=file_size)
         .encode()
     )
 
@@ -331,6 +331,10 @@ def startWork(channel, address):
 
         if parsedRequest[3]['Connection'] == "close":
             break
+
+        if parsedRequest[3]['Connection'] == "close":
+            break
+
 
 
     channel.close()
