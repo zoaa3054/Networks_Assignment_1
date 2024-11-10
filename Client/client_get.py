@@ -58,30 +58,41 @@ while True:
             if (fileType == 'image/png' or fileType == 'image/jpg'):
                 if (checkChuncked):
                     with open(filePath, 'wb') as image:
-                        body = None
-                        chunk = 1
+                        response = b''
+                        chunkNumber = 1
                         # loop on image size for accepting all image chunks
-                        body = client.recv(3072)
-                        while (body != b'0\r\n\r\n'):
-                            image.write((body))
-                            print("chunk number: ", chunk, "\n", body)
-                            chunk += 1
-                            body = client.recv(3072)
+                        while (b'0\r\n\r\n' not in response):
+                            response = client.recv(3007)
+                            chunkContent = response.split(b'\r\n', 1)
+                            chunkSize = int(chunkContent[0].decode(), 16)
+                            body = chunkContent[1]
+                            if (b'0\r\n\r\n' not in response):
+                                body = body.rstrip(b'\r\n0\r\n\r\n')  
+                            else:   
+                                body = body.rstrip(b'\r\n')
+
+                            image.write(body)
+                            print("chunk number: ", chunkNumber, "chunk size: ", chunkSize, "\n", body)
+                            chunkNumber += 1
                 else:
                     with open(filePath, 'wb') as image:
                         body = respondArray[1].split('\r\n\r\n')[1].encode()
-                        image.write((body))
+                        image.write(body)
             # in case it is a text file   
             elif (fileType == 'text/txt' or fileType == 'text/html'):    
                 if (checkChuncked):
                     with open(filePath, 'w') as file:
-                        body = None
-                        chunk = 1
-                        while(body != '0\r\n\r\n'):
-                            body = client.recv(3072).decode()
+                        chunkNumber = 1
+                        response = ''
+                        while('0\r\n\r\n' not in response):
+                            response = client.recv(3072).decode()
+                            chunkContent = response.split('\r\n')
+                            chunkSize = int(chunkContent[0], 16)
+                            body = chunkContent[1]
                             file.write(body)
-                            print("chunk number: ", chunk, "\n", body)
-                            chunk += 1
+                            print("chunk Number: ", chunkNumber, "chunk size: ", chunkSize, "\n", body)
+                            chunkNumber += 1
+                            
                 else:
                     with open(filePath, 'w') as file:
                         body = respondArray[1].split('\r\n\r\n')[1]
@@ -92,6 +103,8 @@ while True:
         client.close()
         break
     
+    client.sendall("CLOSE".encode())
+    print(client.recv(1024).decode())
     client.close()
     break
 

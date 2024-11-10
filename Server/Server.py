@@ -2,11 +2,16 @@ import threading
 import socket
 import asyncio
 import time
+import sys
 # global variable for time out of the server in sec
 
 SuccessStatusLine = 'HTTP/1.1 200 OK\r\n'
 NotFoundStatusLine = 'HTTP/1.1 404 Not Found\r\n'
 
+port = 80
+
+if (len(sys.argv) > 1):
+    port = int(sys.argv[1])
 
 # function for getting the file size
 def get_file_size(file):
@@ -30,8 +35,13 @@ def parse_http_request(request):
 
     # Extract the method, URL, and version from the first line
     print("head line: ",lines[0])
-    method, url, version = lines[0].split(" ")
-
+    method = None
+    url = None
+    version = None
+    if (len(lines[0].split(" ")) > 1):
+        method, url, version = lines[0].split(" ")
+    else: 
+        method = lines[0]
     # Initialize the headers and body
     headers = {}
     body = ''
@@ -62,13 +72,14 @@ def handle_get_text_file_request(url):
     file_extension = url.split('.')[-1]
     # Default to 'txt' if the extension is 'htm'
     if file_extension == 'htm':
-        file_extension = 'txt'
+        file_extension = 'html'
 
+    response_body = None
     try:
         with open(url, 'r') as file:
             file_size = get_file_size(file)
             # Read the entire file if its size is less than 512 bytes
-            if file_size < 512:
+            if file_size < 3000:
                 response_body = file.read()
     except FileNotFoundError:
         # Return a 404 Not Found response if the file is not found
@@ -79,7 +90,7 @@ def handle_get_text_file_request(url):
         ]
 
     # If the file size is small, send it as a single response
-    if file_size < 200:
+    if file_size < 3000:
         return [
             '{status}Content-Type: text/{file_extension}\r\nContent-Length: {file_size}\r\n\r\n{response_body}'
             .format(
@@ -95,11 +106,11 @@ def handle_get_text_file_request(url):
         response = []
         response.append(
             '{status}Content-Type: text/{file_extension}\r\nTransfer-Encoding: chunked\r\n\r\n'
-            .format(status=SuccessStatusLine, file_extension=file_extension, file_size=file_size)
+            .format(status=SuccessStatusLine, file_extension=file_extension)
             .encode()
         )
 
-        # Read and send the file in chunks of 1024 bytes
+        # Read and send the file in chunks of 3000 bytes
         with open(url, 'r') as file:
             while file_size > 0:
                 file_content = file.read(3000)
@@ -141,7 +152,7 @@ def handle_get_image_request(url):
         ]
 
     # If the file size is small, send it as a single response
-    if file_size < 2048:
+    if file_size < 3000:
         with open(url, 'rb') as file:
             response_body = file.read()
         return [
@@ -154,8 +165,8 @@ def handle_get_image_request(url):
     # Use chunked transfer encoding for larger files
     response = []
     response.append(
-        "{status}Content-Type: image/{extension}\r\nContent-Length: {size}\r\nTransfer-Encoding: chunked\r\n\r\n"
-        .format(status=SuccessStatusLine, extension=extension, size=file_size)
+        "{status}Content-Type: image/{extension}\r\nTransfer-Encoding: chunked\r\n\r\n"
+        .format(status=SuccessStatusLine, extension=extension)
         .encode()
     )
 
@@ -213,31 +224,61 @@ def handle_get_request(method, url, version, headers):
     return ["{status}Content-Type: text/html\r\n\r\n<h1> Page not found </h1>"
             .format(status=NotFoundStatusLine).encode()]
 
-def handle_post_request_not_chunked(url, headers, body):
-    with open("."+ url, 'w') as file:
-        if(headers['Content-Type'].split('/')[0] == 'text'):
-            file.write(body.decode())
-        else:
+def handle_post_request_not_chunked(filePath, headers, body):
+    fileType = headers['Content-Type']
+    # in case it is an image
+    # if (fileType == 'image/png' or fileType == 'image/jpg'):
+        # with open(filePath, 'wb') as image:
+    if (fileType == 'text/txt' or fileType == 'text/html'):    
+        with open(filePath, 'w') as file:
             file.write(body)
     
-    return ["{status}Content-Type: text/html\r\n\r\n".format(status=SuccessStatusLine).encode()]
+    return "{status}Content-Type: {fileType}\r\n\r\n".format(fileType=fileType, status=SuccessStatusLine).encode()
 
-def handle_post_request_chunked(url, headers, channel):
-    end_of_chunk = b'0\r\n\r\n'
+def handle_post_request_chunked(filePath, headers, channel):
+    fileType = headers['Content-Type']
+    # in case it is an image
+    if (fileType == 'image/png' or fileType == 'image/jpg'):
+        with open(filePath, 'wb') as image:
+            response = b''
+            chunkNumber = 1
+            # loop on image size for accepting all image chunks
+            while (b'0\r\n\r\n' not in response):
+                response = channel.recv(3007)
+                chunkContent = response.split(b'\r\n', 1)
+                chunkSize = int(chunkContent[0].decode(), 16)
+                body = chunkContent[1]
+                if (b'0\r\n\r\n' not in response):
+                    body = body.rstrip(b'\r\n0\r\n\r\n')  
+                else:   
+                    body = body.rstrip(b'\r\n')
+                    
+                image.write(body)
+                print("chunk number: ", chunkNumber, "chunk size: ", chunkSize, "\n", body)
+                chunkNumber += 1
+        
+    # in case it is a text file   
+    elif (fileType == 'text/txt' or fileType == 'text/html'):    
+        with open(filePath, 'w') as file:
+            chunkNumber = 1
+            response = ''
+            while('0\r\n\r\n' not in response):
+                response = channel.recv(3007).decode()
+                chunkContent = response.split('\r\n')
+                chunkSize = int(chunkContent[0], 16)
+                body = chunkContent[1]
+                file.write(body)
+                print("chunk Number: ", chunkNumber, "chunk size: ", chunkSize, "\n", body)
+                chunkNumber += 1
+    
+    return "{status}Content-Type: {fileType}\r\n\r\n".format(fileType=fileType, status=SuccessStatusLine).encode()               
 
-    request = channel.recv(3072).decode()
-    while request != end_of_chunk.decode():
-        with open("."+ url, 'ab') as file:
-            if(headers['Content-Type'].split('/')[0] == 'text'):
-                file.write(request.decode().split('\r\n')[1])
-            else:
-                file.write(request.decode().split('\r\n')[1].encode())
-        request = channel.recv(3072).decode()
 
 
 # function of the work done by some connection on a separate thread
 def startWork(server, channel, address):
     while True:
+        print("A the start of the Server")
         # accepting the request and printing it
         request = channel.recv(3072).decode()
 
@@ -252,7 +293,7 @@ def startWork(server, channel, address):
             channel.send("CLOSED".encode())
             break
 
-        if (parsedRequest[0] == "GET"):
+        elif (parsedRequest[0] == "GET"):
             print("GET request")
             response = handle_get_request(parsedRequest[0], parsedRequest[1], parsedRequest[2], parsedRequest[3])
             print("no. chunks:", len(response))
@@ -260,27 +301,24 @@ def startWork(server, channel, address):
                 channel.send(response[i])
                 print('{address}, chunk: {no} sent'.format(address=address, no=i+1))
 
-        if (parsedRequest[0] == "POST"):
-            if 'Transfer-Encoding' in parsedRequest[3].keys():
-                if parsedRequest[3]['Transfer-Encoding'] == "chunked":
-                    print("POST request chunked")
-                    response = handle_post_request_chunked(parsedRequest[1], parsedRequest[3],parsedRequest[4])
-                    channel.send(response)
-                else:
-                    print("POST request not chunked")
-                    channel.send("{status}Content-Type: text/html\r\n\r\n".format(status=SuccessStatusLine).encode())
-                    handle_post_request_not_chunked(parsedRequest[1], parsedRequest[3], channel)
+        elif (parsedRequest[0] == "POST"):
+            if ('Transfer-Encoding' in parsedRequest[3].keys() and parsedRequest[3]['Transfer-Encoding'] == "chunked"):
+                print("POST request chunked")
+                channel.send(handle_post_request_chunked(parsedRequest[1], parsedRequest[3],channel))
+            else:
+                print("POST request not chunked")
+                channel.send(handle_post_request_not_chunked(parsedRequest[1], parsedRequest[3], parsedRequest[4]))
+                    
             
 
-        if parsedRequest[3]['Connection'] == "close":
-            break
+        # if parsedRequest[3]['Connection'] == "close":
+        #     break
 
 
     channel.close()
 
      
 # initializing the server socket for TCP handshaking
-port = 8000
 ip = '127.0.0.1'
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server.bind((ip, port))
