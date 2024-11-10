@@ -206,7 +206,6 @@ def handle_get_request(method, url, version, headers):
     if url == '/':
         url = '/index.html'
 
-    
     extension = url.split('.')[-1]
     if extension == 'htm' or extension == 'html' or extension == 'txt':
         if list(url)[0] == '/':
@@ -221,7 +220,6 @@ def handle_get_request(method, url, version, headers):
         else:
                 return handle_get_image_request(url)
             
-
     return ["{status}Content-Type: text/html\r\n\r\n<h1> Page not found </h1>"
             .format(status=NotFoundStatusLine).encode()]
 
@@ -331,6 +329,8 @@ def startWork(channel, address):
 
         if parsedRequest[3]['Connection'] == "close":
             break
+        
+        
 
 
     channel.close()
