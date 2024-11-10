@@ -28,13 +28,13 @@ def handle_post_text_file_request(url):
     file_extension = url.split('.')[-1]
     # Default to 'txt' if the extension is 'htm'
     if file_extension == 'htm':
-        file_extension = 'txt'
+        file_extension = 'html'
 
     response_body = None
     try:
         with open(url, 'r') as file:
             file_size = get_file_size(file)
-            # Read the entire file if its size is less than 512 bytes
+            # Read the entire file if its size is less than 3000 bytes
             if file_size < 3000:
                 response_body = file.read()
     except FileNotFoundError:
@@ -45,7 +45,7 @@ def handle_post_text_file_request(url):
     # If the file size is small, send it as a single response
     if file_size < 3000:
         return [
-            'POST {url} HTTP/1.1\r\nContent-Type: text/{file_extension}\r\nContent-Length: {file_size}\r\nConnection: keep-alive\r\n\r\n{response_body}'
+            'POST {url} HTTP/1.1\r\nContent-Type: text/{file_extension}\r\nContent-Length: {file_size}\r\nConnection: close\r\n\r\n{response_body}'
             .format(
                 url=url,
                 response_body=response_body,
@@ -58,7 +58,7 @@ def handle_post_text_file_request(url):
         # Use chunked transfer encoding for larger files
         response = []
         response.append(
-            'POST {url} HTTP/1.1\r\nContent-Type: text/{file_extension}\r\nTransfer-Encoding: chunked\r\nConnection: keep-alive\r\n\r\n'
+            'POST {url} HTTP/1.1\r\nContent-Type: text/{file_extension}\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n'
             .format(url=url, file_extension=file_extension)
             .encode()
         )
@@ -96,6 +96,8 @@ def handle_post_image_request(url):
     try:
         with open(url, 'rb') as file:
             file_size = get_file_size(file)
+            if file_size < 3000:
+                response_body = file.read()
     except FileNotFoundError:
         # Return a 404 Not Found response if the file is not found
         print("Error 404: File Not Found")
@@ -103,24 +105,26 @@ def handle_post_image_request(url):
 
     # If the file size is small, send it as a single response
     if file_size < 3000:
-        with open(url, 'rb') as file:
-            response_body = file.read()
-        return [
-            "POST {url} HTTP/1.1\r\nContent-Type: image/{extension}\r\nContent-Length: {size}\r\nConnection: keep-alive\r\n\r\n"
+        print("POST {url} HTTP/1.1\r\nContent-Type: image/{extension}\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n"
             .format(url=url, size=file_size, extension=extension)
             .encode()
-            + response_body + '\r\n'.encode()
+            + response_body)
+        return [
+            "POST {url} HTTP/1.1\r\nContent-Type: image/{extension}\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n"
+            .format(url=url, size=file_size, extension=extension)
+            .encode()
+            + response_body
         ]
 
     # Use chunked transfer encoding for larger files
     response = []
     response.append(
-        "POST {url} HTTP/1.1\r\nContent-Type: image/{extension}\r\nTransfer-Encoding: chunked\r\nConnection: keep-alive\r\n\r\n"
+        "POST {url} HTTP/1.1\r\nContent-Type: image/{extension}\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
         .format(url=url, extension=extension)
         .encode()
     )
 
-    # Read and send the file in chunks of 1024 bytes
+    # Read and send the file in chunks of 3000 bytes
     with open(url, 'rb') as file:
         while file_size > 0:
             file_content = file.read(3000)
@@ -201,7 +205,7 @@ while True:
             'Cache-Control': 'no-cache',
             'Host': f'{serverIP}:{port}',
             'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
+            'Connection': 'close',
             'Transfer-Encoding': 'identity',
             'Content-Type': 'text/html'
         }
@@ -210,73 +214,19 @@ while True:
         if request == None:
             break
         print("no. chunks:", len(request))
-        for i in range(len(request)):
+    
+        
+        client.send(request[0])
+        print('{address}, chunk: {no} sent\n'.format(address='127.0.0.1', no=1))
+        print(client.recv(3072).decode())
+        
+        for i in range(1,len(request)):
             client.send(request[i])
-            print('{address}, chunk: {no} sent'.format(address='127.0.0.1', no=i+1))
-        print(client.recv(1024).decode())
-        # # attaching host header
-        # request = f"GET {filePath} HTTP/1.1\r\nAccept: */*\r\nCache-Control: no-cache\r\nHost: {serverIP}:{port}\r\nAccept-Encoding: gzip, deflate, br\r\nConnection: keep-alive\r\n"
-        # client.send(request.encode())
-        # response = client.recv(3072).decode()
-        # print(response)
-        # respondArray = response.split('\r\n', 1)
-        # statusLine = respondArray[0]
-        # header = respondArray[1].split('\r\n\r\n')[0]
-        # # in case of GET a file is saved in the current directory if file is found in the server               
-        # # if file requested is found in the server (check status line)
-        # if (statusLine == 'HTTP/1.1 200 OK'): 
-        #     fileType = getValueOfHeaderField(header, 'Content-Type')
-        #     if (filePath[0] == '/'): filePath = '.' + filePath
-        #     checkChuncked = True
-        #     if (getValueOfHeaderField(header, 'Transfer-Encoding') == None): 
-        #         checkChuncked = False
-        #     # in case it is an image
-        #     if (fileType == 'image/png' or fileType == 'image/jpg'):
-        #         if (checkChuncked):
-        #             with open(filePath, 'wb') as image:
-        #                 response = b''
-        #                 chunkNumber = 1
-        #                 # loop on image size for accepting all image chunks
-        #                 while (b'0\r\n\r\n' not in response):
-        #                     response = client.recv(3007)
-        #                     chunkContent = response.split(b'\r\n', 1)
-        #                     chunkSize = int(chunkContent[0].decode(), 16)
-        #                     body = chunkContent[1]
-        #                     if (b'0\r\n\r\n' not in response):
-        #                         body = body.rstrip(b'\r\n0\r\n\r\n')  
-        #                     else:   
-        #                         body = body.rstrip(b'\r\n')
-                                
-        #                     image.write(body)
-        #                     print("chunk number: ", chunkNumber, "chunk size: ", chunkSize, "\n", body)
-        #                     chunkNumber += 1
-        #         else:
-        #             with open(filePath, 'wb') as image:
-        #                 body = respondArray[1].split('\r\n\r\n')[1].encode()
-        #                 image.write(body)
-        #     # in case it is a text file   
-        #     elif (fileType == 'text/txt' or fileType == 'text/html'):    
-        #         if (checkChuncked):
-        #             with open(filePath, 'w') as file:
-        #                 chunkNumber = 1
-        #                 response = ''
-        #                 while('0\r\n\r\n' not in response):
-        #                     response = client.recv(3007).decode()
-        #                     chunkContent = response.split('\r\n')
-        #                     chunkSize = int(chunkContent[0], 16)
-        #                     body = chunkContent[1]
-        #                     file.write(body)
-        #                     print("chunk Number: ", chunkNumber, "chunk size: ", chunkSize, "\n", body)
-        #                     chunkNumber += 1
-                            
-        #         else:
-        #             with open(filePath, 'w') as file:
-        #                 body = respondArray[1].split('\r\n\r\n')[1]
-        #                 file.write(body)
-
-        client.sendall("CLOSE".encode())
-        print(client.recv(1024).decode())
+            print('{address}, chunk: {no} sent'.format(address='127.0.0.1', no=i))
+        
+        print(client.recv(3072).decode())
         client.close()
+        print("Connection is cut!")
         break
     except(ConnectionAbortedError, ConnectionResetError):
         print("Server is closed!")

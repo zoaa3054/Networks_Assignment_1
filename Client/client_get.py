@@ -39,13 +39,13 @@ while True:
     #checking if server is closed
     try:
         # attaching host header
-        request = f"GET {filePath} HTTP/1.1\r\nAccept: */*\r\nCache-Control: no-cache\r\nHost: {serverIP}:{port}\r\nAccept-Encoding: gzip, deflate, br\r\nConnection: keep-alive\r\n"
+        request = f"GET {filePath} HTTP/1.1\r\nAccept: */*\r\nCache-Control: no-cache\r\nHost: {serverIP}:{port}\r\nAccept-Encoding: gzip, deflate, br\r\nConnection: close\r\n"
         client.send(request.encode())
-        response = client.recv(3072).decode()
+        response = client.recv(3072)
         print(response)
-        respondArray = response.split('\r\n', 1)
-        statusLine = respondArray[0]
-        header = respondArray[1].split('\r\n\r\n')[0]
+        respondArray = response.split(b'\r\n', 1)
+        statusLine = respondArray[0].decode()
+        header = respondArray[1].split(b'\r\n\r\n')[0].decode()
         # in case of GET a file is saved in the current directory if file is found in the server               
         # if file requested is found in the server (check status line)
         if (statusLine == 'HTTP/1.1 200 OK'): 
@@ -76,7 +76,7 @@ while True:
                             chunkNumber += 1
                 else:
                     with open(filePath, 'wb') as image:
-                        body = respondArray[1].split('\r\n\r\n')[1].encode()
+                        body = respondArray[1].split(b'\r\n\r\n')[1]
                         image.write(body)
             # in case it is a text file   
             elif (fileType == 'text/txt' or fileType == 'text/html'):    
@@ -85,7 +85,7 @@ while True:
                         chunkNumber = 1
                         response = ''
                         while('0\r\n\r\n' not in response):
-                            response = client.recv(3072).decode()
+                            response = client.recv(3007).decode()
                             chunkContent = response.split('\r\n')
                             chunkSize = int(chunkContent[0], 16)
                             body = chunkContent[1]
@@ -95,7 +95,7 @@ while True:
                             
                 else:
                     with open(filePath, 'w') as file:
-                        body = respondArray[1].split('\r\n\r\n')[1]
+                        body = respondArray[1].split(b'\r\n\r\n')[1].decode()
                         file.write(body)
 
     except(ConnectionAbortedError, ConnectionResetError):
@@ -103,8 +103,8 @@ while True:
         client.close()
         break
     
-    client.sendall("CLOSE".encode())
     print(client.recv(1024).decode())
     client.close()
+    print("Connection is Cut!")
     break
 

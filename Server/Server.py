@@ -32,15 +32,14 @@ def parse_http_request(request):
         tuple: A tuple containing the method, URL, version, headers, and body.
     """
     # Split the request into lines
-    lines = request.split('\r\n')
+    lines = request.split(b'\r\n')
 
     # Extract the method, URL, and version from the first line
-    print("head line: ",lines[0])
     method = None
     url = None
     version = None
-    if (len(lines[0].split(" ")) > 1):
-        method, url, version = lines[0].split(" ")
+    if (len(lines[0].split(b" ")) > 1):
+        method, url, version = lines[0].decode().split(" ")
     else: 
         method = lines[0]
     # Initialize the headers and body
@@ -49,13 +48,13 @@ def parse_http_request(request):
 
     # Iterate over the lines, splitting each one into a key-value pair
     for line in lines[1:]:
-        if line == '':
+        if line == b'':
             break
-        key, value = line.split(': ', 1)
+        key, value = line.decode().split(': ', 1)
         headers[key] = value
 
     # Set the body to the last line
-    body = lines[-1]
+    body = request.split(b'\r\n\r\n')[-1]
 
     # Return the parsed request as a tuple
     return method, url, version, headers, body
@@ -214,7 +213,6 @@ def handle_get_request(method, url, version, headers):
             return handle_get_text_file_request(url)
     
     if extension == 'png' or extension == 'gif' or extension == 'jpg' or extension == 'jpeg' or extension == 'ico' or extension == 'icon':
-        print("image")
         if list(url)[0] == '/':
             return handle_get_image_request('.' + url) 
         else:
@@ -226,11 +224,14 @@ def handle_get_request(method, url, version, headers):
 def handle_post_request_not_chunked(filePath, headers, body):
     fileType = headers['Content-Type']
     # in case it is an image
-    # if (fileType == 'image/png' or fileType == 'image/jpg'):
-        # with open(filePath, 'wb') as image:
+    if (fileType == 'image/png' or fileType == 'image/jpg'):
+        with open(filePath, 'wb') as image:
+            image.write(body)
+    
+    # in case it is an file
     if (fileType == 'text/txt' or fileType == 'text/html'):    
         with open(filePath, 'w') as file:
-            file.write(body)
+            file.write(body.decode())
     
     return "{status}Content-Type: {fileType}\r\n\r\n".format(fileType=fileType, status=SuccessStatusLine).encode()
 
@@ -253,7 +254,7 @@ def handle_post_request_chunked(filePath, headers, channel):
                     body = body.rstrip(b'\r\n')
                     
                 image.write(body)
-                print("chunk number: ", chunkNumber, "chunk size: ", chunkSize, "\n", body)
+                print("chunk number: ", chunkNumber, "chunk size: ", chunkSize)
                 chunkNumber += 1
         
     # in case it is a text file   
@@ -267,10 +268,10 @@ def handle_post_request_chunked(filePath, headers, channel):
                 chunkSize = int(chunkContent[0], 16)
                 body = chunkContent[1]
                 file.write(body)
-                print("chunk Number: ", chunkNumber, "chunk size: ", chunkSize, "\n", body)
+                print("chunk Number: ", chunkNumber, "chunk size: ", chunkSize)
                 chunkNumber += 1
-    
-    return "{status}Content-Type: {fileType}\r\n\r\n".format(fileType=fileType, status=SuccessStatusLine).encode()               
+        
+                
 
 
 
@@ -279,14 +280,14 @@ def startWork(channel, address):
             
     channel.settimeout(20.0)
     while True:
-        print("A the start of the Server")
+        
         # accepting the request and printing it
         request = None
         try:
             request = channel.recv(3072)
         except:
             print('{address} channel terminated due to timeout'.format(address=address))
-            print("threads: ", threading.active_count())
+            print("threads: ", threading.active_count()-1)
             break
         
         if request == None:
@@ -302,36 +303,28 @@ def startWork(channel, address):
                 "\nbody: ", parsedRequest[4],
                 "\nchannel:", address,
                 "\n------------------------------------")
+        
 
-        if (parsedRequest[0] == "CLOSE"):
-            channel.send("CLOSED".encode())
-            break
 
-        elif (parsedRequest[0] == "GET"):
-            print("GET request")
+        if (parsedRequest[0] == "GET"):
             response = handle_get_request(parsedRequest[0], parsedRequest[1], parsedRequest[2], parsedRequest[3])
             print("no. chunks:", len(response))
             for i in range(len(response)):
                 channel.send(response[i])
                 print('{address}, chunk: {no} sent'.format(address=address, no=i+1))
 
+        
         elif (parsedRequest[0] == "POST"):
-            if 'Transfer-Encoding' in parsedRequest[3].keys():
-                if parsedRequest[3]['Transfer-Encoding'] == "chunked":
-                    print("POST request chunked")
-                    response = handle_post_request_chunked(parsedRequest[1], parsedRequest[3],parsedRequest[4])
-                    channel.send(response)
-                else:
-                    print("POST request not chunked")
-                    channel.send("{status}Content-Type: text/html\r\n\r\n".format(status=SuccessStatusLine).encode())
-                    handle_post_request_not_chunked(parsedRequest[1], parsedRequest[3], channel)
-            
-
-        if parsedRequest[3]['Connection'] == "close":
+            if 'Transfer-Encoding' in parsedRequest[3].keys() and parsedRequest[3]['Transfer-Encoding'] == "chunked":
+                channel.send("{status}Content-Type: text/html\r\n\r\n".format(status=SuccessStatusLine).encode())
+                handle_post_request_chunked(parsedRequest[1], parsedRequest[3],channel)
+            else:
+                response = handle_post_request_not_chunked(parsedRequest[1], parsedRequest[3], parsedRequest[4])
+                channel.send(response)
+        
+        if 'Connection' in parsedRequest[3].keys() and parsedRequest[3]['Connection'] == "close":
+            channel.send("CLOSED".encode())
             break
-        
-        
-
 
     channel.close()
 
