@@ -1,3 +1,4 @@
+from datetime import date
 import threading
 import socket
 import asyncio
@@ -29,7 +30,6 @@ def parse_http_request(request):
     lines = request.split('\r\n')
 
     # Extract the method, URL, and version from the first line
-    print("head line: ",lines[0])
     method, url, version = lines[0].split(" ")
 
     # Initialize the headers and body
@@ -62,7 +62,7 @@ def handle_get_text_file_request(url):
     file_extension = url.split('.')[-1]
     # Default to 'txt' if the extension is 'htm'
     if file_extension == 'htm':
-        file_extension = 'txt'
+        file_extension = 'html'
 
     try:
         with open(url, 'r') as file:
@@ -79,7 +79,7 @@ def handle_get_text_file_request(url):
         ]
 
     # If the file size is small, send it as a single response
-    if file_size < 200:
+    if file_size < 2048:
         return [
             '{status}Content-Type: text/{file_extension}\r\nContent-Length: {file_size}\r\n\r\n{response_body}'
             .format(
@@ -194,7 +194,6 @@ def handle_get_request(method, url, version, headers):
     if url == '/':
         url = '/index.html'
 
-    
     extension = url.split('.')[-1]
     if extension == 'htm' or extension == 'html' or extension == 'txt':
         if list(url)[0] == '/':
@@ -209,7 +208,6 @@ def handle_get_request(method, url, version, headers):
         else:
                 return handle_get_image_request(url)
             
-
     return ["{status}Content-Type: text/html\r\n\r\n<h1> Page not found </h1>"
             .format(status=NotFoundStatusLine).encode()]
 
@@ -236,17 +234,32 @@ def handle_post_request_chunked(url, headers, channel):
 
 
 # function of the work done by some connection on a separate thread
-def startWork(server, channel, address):
+def startWork(channel, address):
+            
+    channel.settimeout(20.0)
     while True:
         # accepting the request and printing it
-        request = channel.recv(3072).decode()
-
+        request = None
+        try:
+            request = channel.recv(3072)
+        except:
+            print('{address} channel terminated due to timeout'.format(address=address))
+            print("threads: ", threading.active_count())
+            break
+        
+        if request == None:
+            print("{status}\r\n\r\n".format(status=NotFoundStatusLine))
+            channel.send("{status}\r\n\r\n".format(status=NotFoundStatusLine).encode())
+            continue
+        
         parsedRequest = parse_http_request(request)
-        print("method: ", parsedRequest[0])
-        print("url: ", parsedRequest[1])
-        print("version: ", parsedRequest[2])
-        print("headers: ", parsedRequest[3].keys())
-        print("body: ", parsedRequest[4])
+        print(  "-------------------------------------\nmethod: ", parsedRequest[0],
+                "\nurl: ", parsedRequest[1], 
+                "\nversion: ", parsedRequest[2],
+                "\nheaders: ", parsedRequest[3].keys(), 
+                "\nbody: ", parsedRequest[4],
+                "\nchannel:", address,
+                "\n------------------------------------")
 
         if (parsedRequest[0] == "CLOSE"):
             channel.send("CLOSED".encode())
@@ -274,11 +287,13 @@ def startWork(server, channel, address):
 
         if parsedRequest[3]['Connection'] == "close":
             break
+        
+        
 
 
     channel.close()
 
-     
+
 # initializing the server socket for TCP handshaking
 port = 8000
 ip = '127.0.0.1'
@@ -288,18 +303,16 @@ server.bind((ip, port))
 # start listening for the incoming
 server.listen(2)
 print("Server started!")
-beginingSwitch = True
-
+server.settimeout(20.0)
 while(True):
     
     try:
         newChannel, address = server.accept()
-    except(socket.error):
-        # print("Server closed due to time out (" , timeout , "sec)!")
+    except(socket.timeout):
+        print("Server closed due to time out (20 sec)!")
         break
 
     
     print("new connection accepted: ", address)
-    newChannelThread = threading.Thread(target= startWork, args= (server, newChannel, address))
+    newChannelThread = threading.Thread(target= startWork, args= (newChannel, address))
     newChannelThread.start()
-    
