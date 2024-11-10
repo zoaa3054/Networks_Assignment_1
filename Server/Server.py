@@ -296,16 +296,8 @@ def startWork(channel, address):
             continue
         
         parsedRequest = parse_http_request(request)
-        print(  "-------------------------------------\nmethod: ", parsedRequest[0],
-                "\nurl: ", parsedRequest[1], 
-                "\nversion: ", parsedRequest[2],
-                "\nheaders: ", parsedRequest[3].keys(), 
-                "\nbody: ", parsedRequest[4],
-                "\nchannel:", address,
-                "\n------------------------------------")
+        print(f"-------------------------------------\nmethod: {parsedRequest[0]}\nurl: {parsedRequest[1]}\nversion: {parsedRequest[2]}\nheaders: {parsedRequest[3].keys()}\nbody: {parsedRequest[4]}\nchannel: {address}\n------------------------------------")
         
-
-
         if (parsedRequest[0] == "GET"):
             response = handle_get_request(parsedRequest[0], parsedRequest[1], parsedRequest[2], parsedRequest[3])
             print("no. chunks:", len(response))
